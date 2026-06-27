@@ -1,0 +1,11 @@
+# build artifacts
+/ra-rewrite
+*.o
+*.a
+
+# vendored static dependency build tree
+/deps/
+
+# editor
+*.swp
+.vscode/

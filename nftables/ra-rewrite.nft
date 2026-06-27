@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+#
+# ra-rewrite.nft - nftables rules for ra-rewrite (Phase 1).
+#
+# Copyright (C) 2026  ra-rewrite contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Two jobs on the WAN-facing bridge member (here: enp4s0):
+#
+#   1. Queue incoming Router Advertisements (ICMPv6 type 134) to NFQUEUE 0 so
+#      ra-rewrite can rewrite and reinject them. The `bypass` flag is
+#      fail-open: if ra-rewrite is not running, the original RA passes through
+#      unchanged rather than being dropped, so IPv6 never fully breaks.
+#
+#   2. (Phase 1, optional) Drop upstream DHCPv6 so DHCPv6-capable clients fall
+#      back to SLAAC using the prefix ra-rewrite injects. Remove this table if
+#      you want to leave DHCPv6 alone (or once a dedicated DHCPv6 tool exists
+#      in Phase 2).
+#
+# Note on hooks: queueing from a bridge requires the bridge family. We hook
+# the bridge prerouting so the RA is intercepted as it traverses the bridge
+# from the WAN member toward the LAN members. Set the bridge name to yours.
+#
+# Adjust BR (bridge) and WAN_IF (WAN-side member) to your setup.
+
+define BR     = "lanBridge"
+define WAN_IF = "enp4s0"
+
+# --- Bridge family: catch RAs flowing through the bridge ----------------
+table bridge ra_rewrite {
+    chain prerouting {
+        type filter hook prerouting priority -300; policy accept;
+
+        # Only RAs entering from the WAN member. iif is the physical inbound
+        # bridge port. bypass = fail-open if ra-rewrite is down.
+        meta ibrname $BR iif $WAN_IF icmpv6 type 134 queue num 0 bypass
+    }
+}
+
+# --- Drop upstream DHCPv6 (server side) so clients use SLAAC ------------
+# DHCPv6: server->client has UDP sport 547 (dport 546); client->server has
+# dport 547. Dropping sport 547 from WAN kills replies; clients fall back to
+# SLAAC. Comment out the whole table to leave DHCPv6 untouched.
+table bridge ra_rewrite_dhcp {
+    chain prerouting {
+        type filter hook prerouting priority -300; policy accept;
+        iif $WAN_IF udp sport 547 drop
+    }
+}
