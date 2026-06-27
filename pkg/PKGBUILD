@@ -9,14 +9,8 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/kepheus-zhou/ra-rewrite'
 license=('GPL-2.0-or-later')
 depends=('libnetfilter_queue')
-backup=()
-install=ra-rewrite.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('5980f4805ec59caf3265c4c02ba4bb48d58fe86a3fa790e8ecb1a36ecb30ba16')
-
-prepare() {
-    cp "$pkgname-$pkgver/pkg/ra-rewrite.install" .
-}
 
 build() {
     cd "$pkgname-$pkgver"
@@ -32,4 +26,10 @@ package() {
     install -Dm644 nftables/ra-rewrite.nft \
         "$pkgdir/usr/share/ra-rewrite/ra-rewrite.nft.example"
     install -dm755 "$pkgdir/etc/ra-rewrite"
+
+    echo ""
+    msg2 "Quick-start:"
+    msg2 "  1. Adapt /usr/share/ra-rewrite/ra-rewrite.nft.example and load it"
+    msg2 "  2. Create /etc/ra-rewrite/<iface>.conf with ARGS=..."
+    msg2 "  3. systemctl enable --now ra-rewrite@<iface>"
 }
