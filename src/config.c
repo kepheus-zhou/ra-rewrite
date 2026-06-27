@@ -22,7 +22,7 @@ void config_usage(const char *prog)
 "PASSED THROUGH from the upstream RA unchanged.\n"
 "\n"
 "Required:\n"
-"  --iface IFACE              interface to reinject the rewritten RA on\n"
+"  --iface IFACE              WAN-side bridge member that receives upstream RAs\n"
 "\n"
 "General:\n"
 "  --queue N                  NFQUEUE number to bind (default 0)\n"

@@ -1,0 +1,31 @@
+# Maintainer: kepheus-zhou <kepheus.zhou@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+pkgname=ra-rewrite
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='IPv6 Router Advertisement rewriter — inject SLAAC prefix/RDNSS into a DHCPv6-only network without becoming the router'
+arch=('x86_64' 'aarch64')
+url='https://github.com/kepheus-zhou/ra-rewrite'
+license=('GPL-2.0-or-later')
+depends=('libnetfilter_queue')
+backup=()
+install=ra-rewrite.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    make dynamic
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm755 ra-rewrite \
+        "$pkgdir/usr/bin/ra-rewrite"
+    install -Dm644 systemd/ra-rewrite@.service \
+        "$pkgdir/usr/lib/systemd/system/ra-rewrite@.service"
+    install -Dm644 nftables/ra-rewrite.nft \
+        "$pkgdir/usr/share/ra-rewrite/ra-rewrite.nft.example"
+    install -dm755 "$pkgdir/etc/ra-rewrite"
+}

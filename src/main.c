@@ -16,7 +16,6 @@
  */
 #include "config.h"
 #include "ra.h"
-#include "inject.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,8 +31,7 @@ static volatile sig_atomic_t g_stop = 0;
 static void on_signal(int s) { (void)s; g_stop = 1; }
 
 struct context {
-    struct config   *cfg;
-    struct injector *inj;
+    struct config *cfg;
 };
 
 /* The IPv6 header is 40 bytes; ICMPv6 follows. Extract src/dst and the
@@ -75,49 +73,39 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     struct in6_addr src, dst;
     const uint8_t *icmp6;
     size_t icmp6_len;
-    if (split_ipv6(payload, (size_t)plen, &src, &dst, &icmp6, &icmp6_len) != 0) {
-        /* Not what we expected; let it pass untouched. */
+    if (split_ipv6(payload, (size_t)plen, &src, &dst, &icmp6, &icmp6_len) != 0)
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-    }
 
     struct ra_parsed up;
-    if (!ra_parse(icmp6, icmp6_len, &up)) {
+    if (!ra_parse(icmp6, icmp6_len, &up))
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-    }
 
-    /* Determine the source MAC for our reinjected frame: borrow upstream's
-     * SLLAO MAC if present (so we impersonate the real router), else our own
-     * interface MAC, unless explicitly overridden. */
-    uint8_t src_mac[6];
-    if (cfg->ov.set_src_mac)
-        memcpy(src_mac, cfg->ov.src_mac, 6);
-    else if (up.opt_sllao)
-        memcpy(src_mac, up.opt_sllao + 2, 6);
-    else
-        memcpy(src_mac, ctx->inj->ifmac, 6);
-
-    /* Build the rewritten RA. */
-    uint8_t out[1500];
-    ssize_t n = ra_build(&up, &cfg->ov, &src, &dst, out, sizeof(out));
-    if (n < 0) {
-        /* Build failed; pass original through rather than dropping. */
+    /* Build the rewritten ICMPv6 RA body. */
+    uint8_t icmp6_out[1500];
+    ssize_t icmp6_n = ra_build(&up, &cfg->ov, &src, &dst, icmp6_out, sizeof(icmp6_out));
+    if (icmp6_n < 0)
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-    }
 
-    if (injector_send_ra(ctx->inj, src_mac, &src, &dst, out, (size_t)n) != 0) {
-        /* Injection failed; pass original through so clients still get an RA. */
-        return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-    }
+    /* Reconstruct the full IPv6 packet: original 40-byte header + new ICMPv6.
+     * NF_ACCEPT with non-NULL data replaces the packet in-flight; the bridge
+     * forwards it to LAN ports using the original Ethernet frame header
+     * (upstream router's MAC stays intact -- no AF_PACKET, no FDB pollution,
+     * no re-queue loop). */
+    uint8_t pkt_out[40 + sizeof(icmp6_out)];
+    memcpy(pkt_out, payload, 40);
+    pkt_out[4] = ((size_t)icmp6_n >> 8) & 0xff;
+    pkt_out[5] =  (size_t)icmp6_n       & 0xff;
+    memcpy(pkt_out + 40, icmp6_out, icmp6_n);
 
     if (cfg->verbose) {
         char sbuf[INET6_ADDRSTRLEN];
         inet_ntop(AF_INET6, &src, sbuf, sizeof(sbuf));
-        fprintf(stderr, "rewrote RA from %s (%zd bytes) and reinjected on %s\n",
-                sbuf, n, cfg->iface);
+        fprintf(stderr, "rewrote RA from %s (%zu -> %zu bytes) on %s\n",
+                sbuf, icmp6_len, (size_t)icmp6_n, cfg->iface);
     }
 
-    /* Drop the original; our rewritten copy already went out. */
-    return nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
+    return nfq_set_verdict(qh, id, NF_ACCEPT,
+                           (uint32_t)(40 + icmp6_n), pkt_out);
 }
 
 int main(int argc, char **argv)
@@ -127,18 +115,11 @@ int main(int argc, char **argv)
     if (rc != 0)
         return rc == 1 ? 0 : rc; /* --help returns 1 -> exit 0 */
 
-    struct injector inj;
-    if (injector_open(&inj, cfg.iface) != 0) {
-        fprintf(stderr, "failed to open injector on %s\n", cfg.iface);
-        return 1;
-    }
-
-    struct context ctx = { .cfg = &cfg, .inj = &inj };
+    struct context ctx = { .cfg = &cfg };
 
     struct nfq_handle *h = nfq_open();
     if (!h) {
         fprintf(stderr, "nfq_open failed\n");
-        injector_close(&inj);
         return 1;
     }
 
@@ -148,7 +129,6 @@ int main(int argc, char **argv)
     if (nfq_bind_pf(h, AF_INET6) < 0) {
         fprintf(stderr, "nfq_bind_pf failed\n");
         nfq_close(h);
-        injector_close(&inj);
         return 1;
     }
 
@@ -156,7 +136,6 @@ int main(int argc, char **argv)
     if (!qh) {
         fprintf(stderr, "nfq_create_queue(%u) failed\n", cfg.queue_num);
         nfq_close(h);
-        injector_close(&inj);
         return 1;
     }
 
@@ -164,7 +143,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "nfq_set_mode failed\n");
         nfq_destroy_queue(qh);
         nfq_close(h);
-        injector_close(&inj);
         return 1;
     }
 
@@ -175,7 +153,7 @@ int main(int argc, char **argv)
     char buf[65536] __attribute__((aligned));
 
     if (cfg.verbose)
-        fprintf(stderr, "ra-rewrite: bound to queue %u, injecting on %s\n",
+        fprintf(stderr, "ra-rewrite: bound to queue %u, watching %s\n",
                 cfg.queue_num, cfg.iface);
 
     while (!g_stop) {
@@ -196,6 +174,5 @@ int main(int argc, char **argv)
 
     nfq_destroy_queue(qh);
     nfq_close(h);
-    injector_close(&inj);
     return 0;
 }

@@ -10,7 +10,7 @@
 
 struct config {
     unsigned int queue_num;   /* NFQUEUE number (default 0) */
-    const char  *iface;       /* interface to inject the rewritten RA on */
+    const char  *iface;       /* WAN-side bridge member (logged in verbose output) */
     struct ra_override ov;    /* field overrides */
     bool verbose;
 };

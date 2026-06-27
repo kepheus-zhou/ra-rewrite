@@ -14,13 +14,13 @@
 #   make distclean  - also remove deps/
 
 CC      ?= cc
-CFLAGS  ?= -O2 -g -Wall -Wextra -std=c11
+CFLAGS  ?= -O2 -g -Wall -Wextra -std=c11 -D_GNU_SOURCE
 PREFIX  ?= /usr/local
 
 DEPS_PREFIX := deps/install
 
-SRC := src/main.c src/ra.c src/inject.c src/config.c
-HDR := src/ra.h src/inject.h src/config.h
+SRC := src/main.c src/ra.c src/config.c
+HDR := src/ra.h src/config.h
 BIN := ra-rewrite
 
 .PHONY: all static dynamic deps test clean distclean install uninstall

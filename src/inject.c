@@ -24,6 +24,7 @@
 int injector_open(struct injector *inj, const char *iface)
 {
     memset(inj, 0, sizeof(*inj));
+    strncpy(inj->iface, iface, sizeof(inj->iface) - 1);
 
     inj->fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IPV6));
     if (inj->fd < 0) {

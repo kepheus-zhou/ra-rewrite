@@ -11,10 +11,10 @@
 #include <netinet/in.h>
 
 struct injector {
-    int      fd;       /* AF_PACKET raw socket */
-    int      ifindex;  /* interface index */
-    uint8_t  ifmac[6]; /* our interface MAC (unused for src, RA src MAC is
-                          taken from the rewritten frame) */
+    int      fd;            /* AF_PACKET raw socket */
+    int      ifindex;       /* interface index */
+    uint8_t  ifmac[6];      /* interface MAC (fallback src when no SLLAO) */
+    char     iface[16];     /* interface name, for logging */
 };
 
 /* Open an AF_PACKET socket bound to `iface`. Returns 0 on success. */

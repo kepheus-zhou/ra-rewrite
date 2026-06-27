@@ -9,11 +9,10 @@ The default router stays whoever the upstream RA says it is (the source LLA is
 preserved), so data traffic still flows to the real gateway. Only the RA's
 *contents* are edited in flight.
 
-> **Status:** Early. The RA parse/build core is unit-tested against a real
-> upstream capture and passes. The NFQUEUE + reinjection path and the nftables
-> rules have **not** yet been validated on the target kernel — see
-> [`docs/DESIGN.md`](docs/DESIGN.md) §5 for what to verify first (especially
-> nftables bridge-family `queue` support).
+> **Status:** Tested on real hardware (Arch Linux, bridge setup). nftables
+> bridge-family `queue` works on this kernel. The `NF_ACCEPT`-with-modified-
+> payload approach avoids AF_PACKET reinjection entirely — no FDB pollution,
+> no re-queue loop.
 
 ## Design: overwrite / infer / pass-through
 
@@ -36,24 +35,23 @@ What you achieve is entirely a function of which flags you pass.
 ```
             upstream RA
                 │
-   nftables  ──┴── queue num 0 bypass     (bridge prerouting, WAN member)
+   nftables  ──┴── queue num 0     (bridge prerouting, WAN member iif)
                 │
             ra-rewrite
               ├─ parse upstream RA
               ├─ rebuild applying overrides (M/O, prefix, RDNSS, MTU, ...)
-              ├─ reinject at L2 on --iface, src MAC/LLA = upstream's
-              └─ DROP the original
-                │
-            rewritten RA  ──► LAN clients
+              └─ NF_ACCEPT with modified IPv6 payload
+                │   (original Ethernet header preserved — src MAC/LLA = upstream's)
+            rewritten RA  ──► bridge floods to LAN ports
 ```
 
-The reinjection is done with a raw `AF_PACKET` socket: the RA is delivered on
-the link directly, with no IP routing-table lookup involved. The source MAC
-and source LLA are borrowed from the upstream RA so clients still install the
-real upstream router as their default gateway.
+The verdict is `NF_ACCEPT` with the rewritten IPv6 payload substituted
+in-place. The kernel retains the original Ethernet frame header (upstream
+router's source MAC and LLA), so clients install the real upstream router as
+their default gateway and data traffic bypasses this host entirely.
 
-`bypass` on the nftables rule makes it **fail-open**: if ra-rewrite is not
-running, the original RA passes through unchanged and IPv6 does not break.
+No AF_PACKET socket is involved: the frame never leaves the bridge software,
+avoiding FDB pollution and re-queue loops.
 
 ## Build
 
@@ -87,7 +85,7 @@ Run `ra-rewrite --help` for the full flag list. Key flags:
 
 | Flag | Effect |
 |------|--------|
-| `--iface IFACE` | interface to reinject on (required) |
+| `--iface IFACE` | WAN-side bridge member that receives upstream RAs (required) |
 | `--queue N` | NFQUEUE number (default 0) |
 | `--managed` / `--no-managed` | set/clear M flag (omit = pass through) |
 | `--other` / `--no-other` | set/clear O flag (omit = pass through) |
@@ -120,30 +118,52 @@ default router is still the real upstream, so data traffic bypasses this host.
 DNS is *softly* hijacked: a client that sets its own DNS still works (the
 RDNSS is only the default suggestion).
 
+## Installation
+
+### Arch Linux (pacman)
+
+A pre-built static binary and PKGBUILD are attached to each
+[GitHub release](https://github.com/kepheus-zhou/ra-rewrite/releases).
+
+```sh
+# Option A: pre-built static binary from release
+sudo install -Dm755 ra-rewrite-linux-x86_64 /usr/bin/ra-rewrite
+
+# Option B: build from source via PKGBUILD (links against system libs)
+cd pkg && makepkg -si
+```
+
+### Manual (any distro)
+
+```sh
+make            # static build; no system netfilter libs required
+sudo make install
+```
+
 ## systemd
 
 ```sh
-sudo make install                       # installs binary + ra-rewrite@.service
 sudo mkdir -p /etc/ra-rewrite
 echo 'ARGS=--no-managed --no-other --prefix 2001:db8:1234:5678::/64 --rdnss 2001:db8:1234:5678::1' \
     | sudo tee /etc/ra-rewrite/enp4s0.conf
+sudo systemctl enable --now nftables
 sudo systemctl enable --now ra-rewrite@enp4s0
 ```
 
-Remember to also load the nftables rules at boot (e.g. via the `nftables`
-service) with a matching queue number.
+The template unit (`ra-rewrite@enp4s0`) takes the WAN-side bridge member as
+the instance name. It reads arguments from `/etc/ra-rewrite/<iface>.conf` and
+restarts automatically on failure. `PartOf=nftables.service` ensures it stops
+when nftables is reloaded (and comes back up after).
 
 ## Limitations / notes
 
 - **nftables bridge-family `queue` support is kernel-dependent.** The shipped
   rule queues from `table bridge ... prerouting`; verify it loads and that RAs
-  are actually queued on your kernel. See `docs/DESIGN.md` §5 for fallbacks.
+  are actually queued on your kernel (tested: Arch Linux, kernel 6.x).
 - Handles RAs with no IPv6 extension headers (the normal case). Packets it
   doesn't understand are passed through untouched.
-- The reinjected frame goes to the all-nodes multicast (`ff02::1`) with the
-  upstream source LLA. This is a soft, fail-open mechanism, not a security
-  control.
-- Requires `CAP_NET_RAW` (AF_PACKET) and `CAP_NET_ADMIN` (NFQUEUE).
+- The RDNSS is a *soft* suggestion; a client that sets its own DNS still works.
+- Requires `CAP_NET_ADMIN` (NFQUEUE via netlink). No raw socket is needed.
 - This is the RA half of a planned pair; a companion DHCPv6 rewriter using the
   same overwrite/infer/pass-through model can cover DHCPv6-only clients.
 

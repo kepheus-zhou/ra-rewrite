@@ -1,0 +1,26 @@
+post_install() {
+    echo ""
+    echo "==> ra-rewrite installed. Quick-start:"
+    echo ""
+    echo "  1. Copy and adapt the example nftables rules:"
+    echo "       # merge /usr/share/ra-rewrite/ra-rewrite.nft.example into"
+    echo "       # your /etc/nftables.conf, or drop it into /etc/nftables.d/"
+    echo "       # Adjust bridge and interface names as needed."
+    echo ""
+    echo "  2. Create a config file for your WAN interface (e.g. enp4s0):"
+    echo "       mkdir -p /etc/ra-rewrite"
+    echo "       cat > /etc/ra-rewrite/enp4s0.conf <<'EOF'"
+    echo "       ARGS=--no-managed --no-other \\"
+    echo "            --prefix 2001:db8:1234:5678::/64 \\"
+    echo "            --rdnss 2001:db8:1234:5678::1"
+    echo "       EOF"
+    echo ""
+    echo "  3. Enable the service (instance name = WAN interface):"
+    echo "       systemctl enable --now nftables"
+    echo "       systemctl enable --now ra-rewrite@enp4s0"
+    echo ""
+}
+
+post_upgrade() {
+    post_install
+}

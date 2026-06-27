@@ -3,32 +3,31 @@
 # Copyright (C) 2026  ra-rewrite contributors
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# The instance name is the interface to reinject on, e.g.:
+# The instance name is the WAN-side bridge member interface, e.g.:
 #   systemctl enable --now ra-rewrite@enp4s0
 #
 # Field overrides go in an environment file. Create
 # /etc/ra-rewrite/enp4s0.conf with a line like:
 #   ARGS=--no-managed --no-other --prefix 2001:db8:1234:5678::/64 --rdnss 2001:db8:1234:5678::1
 #
-# The nftables rules (nftables/ra-rewrite.nft) must be loaded separately and
-# should queue to the same queue number passed here (default 0).
+# The nftables rules must be loaded separately (e.g. via the nftables
+# service) and must queue to the same queue number used here (default 0).
 
 [Unit]
 Description=IPv6 RA rewriter on %i
-After=systemd-networkd-wait-online.service nftables.service
-Wants=systemd-networkd-wait-online.service
+After=network.target nftables.service
 PartOf=nftables.service
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/ra-rewrite/%i.conf
-ExecStart=/usr/local/bin/ra-rewrite --iface %i $ARGS
+ExecStart=/usr/bin/ra-rewrite --iface %i $ARGS
 Restart=on-failure
 RestartSec=3
 
-# Hardening (this needs CAP_NET_RAW and CAP_NET_ADMIN for AF_PACKET + NFQUEUE)
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+# Hardening — only CAP_NET_ADMIN is needed (NFQUEUE via netlink).
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

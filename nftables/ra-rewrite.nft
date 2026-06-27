@@ -26,24 +26,45 @@
 define BR     = "lanBridge"
 define WAN_IF = "enp4s0"
 
-# --- Bridge family: catch RAs flowing through the bridge ----------------
+# --- Bridge family: intercept WAN-side RA and DHCPv6 -------------------
+# Both hooks sit on the same bridge prerouting chain so they share one
+# hook registration. Priority -300 fires before conntrack (-200) and
+# before the default filter (0).
+#
+# Rule 1 — queue ICMPv6 RA (type 134) to ra-rewrite for rewriting.
+#   bypass: fail-open if the daemon is not running (original RA passes
+#   through unchanged rather than being silently dropped).
+#
+# Rule 2 — drop upstream DHCPv6 server replies (UDP sport 547) so
+#   DHCPv6-capable clients fall back to SLAAC. Remove this rule if you
+#   want to leave DHCPv6 alone.
 table bridge ra_rewrite {
     chain prerouting {
         type filter hook prerouting priority -300; policy accept;
+        iif $WAN_IF jump wan_in
+    }
 
-        # Only RAs entering from the WAN member. iif is the physical inbound
-        # bridge port. bypass = fail-open if ra-rewrite is down.
-        meta ibrname $BR iif $WAN_IF icmpv6 type 134 queue num 0 bypass
+    chain wan_in {
+        icmpv6 type 134 queue num 0
+        udp sport 547 drop
     }
 }
 
-# --- Drop upstream DHCPv6 (server side) so clients use SLAAC ------------
-# DHCPv6: server->client has UDP sport 547 (dport 546); client->server has
-# dport 547. Dropping sport 547 from WAN kills replies; clients fall back to
-# SLAAC. Comment out the whole table to leave DHCPv6 untouched.
-table bridge ra_rewrite_dhcp {
+# --- WAN-side IPv6-only filter ------------------------------------------
+# enp4s0 is the campus-facing bridge member; the upstream segment is
+# IPv6-only.  Drop all non-IPv6 frames (IPv4, ARP, …) in both directions
+# so the WAN port is treated as a pure IPv6 link.
+#
+# Priority 0 runs after the RA-queue and DHCPv6-drop chains (-300), which
+# is fine: those act on IPv6 frames (EtherType 0x86dd) that this filter
+# will never touch.
+table bridge wan_ipv6_only {
     chain prerouting {
-        type filter hook prerouting priority -300; policy accept;
-        iif $WAN_IF udp sport 547 drop
+        type filter hook prerouting priority 0; policy accept;
+        iif $WAN_IF ether type != ip6 drop
+    }
+    chain postrouting {
+        type filter hook postrouting priority 0; policy accept;
+        oif $WAN_IF ether type != ip6 drop
     }
 }
