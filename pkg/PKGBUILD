@@ -12,7 +12,7 @@ depends=('libnetfilter_queue')
 backup=()
 install=ra-rewrite.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('5980f4805ec59caf3265c4c02ba4bb48d58fe86a3fa790e8ecb1a36ecb30ba16')
 
 build() {
     cd "$pkgname-$pkgver"

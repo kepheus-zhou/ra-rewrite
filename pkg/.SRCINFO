@@ -1,0 +1,14 @@
+pkgbase = ra-rewrite
+	pkgdesc = IPv6 Router Advertisement rewriter — inject SLAAC prefix/RDNSS into a DHCPv6-only network without becoming the router
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/kepheus-zhou/ra-rewrite
+	install = ra-rewrite.install
+	arch = x86_64
+	arch = aarch64
+	license = GPL-2.0-or-later
+	depends = libnetfilter_queue
+	source = ra-rewrite-1.0.0.tar.gz::https://github.com/kepheus-zhou/ra-rewrite/archive/v1.0.0.tar.gz
+	sha256sums = 5980f4805ec59caf3265c4c02ba4bb48d58fe86a3fa790e8ecb1a36ecb30ba16
+
+pkgname = ra-rewrite
